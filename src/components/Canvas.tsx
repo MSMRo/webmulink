@@ -26,6 +26,7 @@ interface DraggingPort {
   startY: number;
   currentX: number;
   currentY: number;
+  isClickMode?: boolean;
 }
 
 export const Canvas: React.FC<CanvasProps> = ({
@@ -53,9 +54,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
-  // Wire drawing state
+  // Wire drawing state (supports both Drag-to-Connect and Click-to-Connect)
   const [activeWire, setActiveWire] = useState<DraggingPort | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+  const [hoveredPortInfo, setHoveredPortInfo] = useState<{ blockId: string; portId: string; name: string } | null>(null);
 
   // Zoom with Mouse Wheel
   const handleWheel = (e: React.WheelEvent) => {
@@ -91,6 +93,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (activeWire && activeWire.isClickMode) {
+      // Cancel active wire if clicking on background
+      setActiveWire(null);
+      return;
+    }
+
     if (e.button === 0 && e.target === containerRef.current) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -125,11 +133,24 @@ export const Canvas: React.FC<CanvasProps> = ({
   const handleMouseUp = () => {
     setIsPanning(false);
     setDraggingBlockId(null);
-    setActiveWire(null);
+
+    // If active wire was just started with a short click (not dragged), keep it in click-mode!
+    if (activeWire && !activeWire.isClickMode) {
+      const dist = Math.hypot(activeWire.currentX - activeWire.startX, activeWire.currentY - activeWire.startY);
+      if (dist < 8) {
+        // Switch to click-to-connect mode!
+        setActiveWire((prev) => (prev ? { ...prev, isClickMode: true } : null));
+      } else {
+        // Drag ended without hitting a port
+        setActiveWire(null);
+      }
+    }
   };
 
   const handleBlockMouseDown = (e: React.MouseEvent, block: BlockInstance) => {
     e.stopPropagation();
+    if (activeWire && activeWire.isClickMode) return;
+
     onSelectBlock(block.id);
     setSelectedConnectionId(null);
 
@@ -141,8 +162,16 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
+  // Start wire from port (works on both mouse down and click)
   const handlePortMouseDown = (e: React.MouseEvent, block: BlockInstance, port: Port) => {
     e.stopPropagation();
+
+    // If already in click-mode, try connecting to this port!
+    if (activeWire && activeWire.isClickMode) {
+      completeConnection(block, port);
+      return;
+    }
+
     const portPos = getPortPosition(block, port);
     setActiveWire({
       blockId: block.id,
@@ -152,17 +181,19 @@ export const Canvas: React.FC<CanvasProps> = ({
       startY: portPos.y,
       currentX: portPos.x,
       currentY: portPos.y,
+      isClickMode: false,
     });
   };
 
-  const handlePortMouseUp = (e: React.MouseEvent, targetBlock: BlockInstance, targetPort: Port) => {
-    e.stopPropagation();
+  const completeConnection = (targetBlock: BlockInstance, targetPort: Port) => {
     if (!activeWire) return;
 
+    // Check port compatibility (must connect output to input, and not within same block)
     if (activeWire.blockId !== targetBlock.id && activeWire.portType !== targetPort.type) {
       const from = activeWire.portType === 'output' ? activeWire : { blockId: targetBlock.id, portId: targetPort.id };
       const to = activeWire.portType === 'input' ? activeWire : { blockId: targetBlock.id, portId: targetPort.id };
 
+      // Avoid duplicate connections to same input port
       const existing = connections.find((c) => c.toBlockId === to.blockId && c.toPortId === to.portId);
       if (existing) {
         onDeleteConnection(existing.id);
@@ -179,6 +210,13 @@ export const Canvas: React.FC<CanvasProps> = ({
     setActiveWire(null);
   };
 
+  const handlePortMouseUp = (e: React.MouseEvent, targetBlock: BlockInstance, targetPort: Port) => {
+    e.stopPropagation();
+    if (activeWire && !activeWire.isClickMode) {
+      completeConnection(targetBlock, targetPort);
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -193,11 +231,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  const getPortPosition = (block: BlockInstance, port: Port) => {
+  const getBlockDimensions = (block: BlockInstance) => {
     const isSum = block.type === 'sum';
     const isGain = block.type === 'gain';
-    const width = isSum ? 50 : isGain ? 55 : (block.width || 70);
-    const height = isSum ? 50 : isGain ? 50 : (block.height || 54);
+    const isScope = block.type === 'scope' || block.type === 'spectrum';
+
+    if (isSum) return { width: 50, height: 50 };
+    if (isGain) return { width: 55, height: 50 };
+    if (isScope) return { width: 78, height: 66 }; // comfortable spacing for 4 channels
+    return { width: block.width || 72, height: block.height || 56 };
+  };
+
+  const getPortPosition = (block: BlockInstance, port: Port) => {
+    const { width, height } = getBlockDimensions(block);
     const isInput = port.type === 'input';
 
     const portsList = isInput ? block.inputs : block.outputs;
@@ -211,12 +257,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   };
 
-  // Keyboard shortcut: Delete
+  // Keyboard shortcut: Delete or Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (e.key === 'Escape') {
+        if (activeWire) setActiveWire(null);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedBlockId) {
           onDeleteBlock(selectedBlockId);
           onSelectBlock(null);
@@ -229,26 +277,24 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedBlockId, selectedConnectionId, onDeleteBlock, onDeleteConnection, onSelectBlock]);
+  }, [selectedBlockId, selectedConnectionId, activeWire, onDeleteBlock, onDeleteConnection, onSelectBlock]);
 
   // Construct Orthogonal (Manhattan 90-degree) wire path string
   const getOrthogonalPath = (start: { x: number; y: number }, end: { x: number; y: number }) => {
     const dx = end.x - start.x;
 
-    if (dx >= 30) {
-      // Standard forward right-angle routing
+    if (dx >= 24) {
       const midX = start.x + Math.round(dx / 2);
       return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
     } else {
-      // Backward / feedback routing around
       const offsetRight = start.x + 20;
       const offsetLeft = end.x - 20;
-      const midY = start.y < end.y ? Math.min(start.y, end.y) - 40 : Math.max(start.y, end.y) + 40;
+      const midY = start.y < end.y ? Math.min(start.y, end.y) - 35 : Math.max(start.y, end.y) + 35;
       return `M ${start.x} ${start.y} L ${offsetRight} ${start.y} L ${offsetRight} ${midY} L ${offsetLeft} ${midY} L ${offsetLeft} ${end.y} L ${end.x} ${end.y}`;
     }
   };
 
-  // Identify junction branching points (where multiple wires leave the same output port)
+  // Junction points for branching wires
   const junctions = React.useMemo(() => {
     const map = new Map<string, { x: number; y: number; count: number }>();
     connections.forEach((c) => {
@@ -278,13 +324,33 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseUp={handleMouseUp}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="relative flex-1 h-[calc(100vh-4.5rem)] bg-white overflow-hidden cursor-crosshair select-none"
+      className={`relative flex-1 h-[calc(100vh-4.5rem)] bg-white overflow-hidden select-none ${
+        activeWire ? 'cursor-crosshair' : 'cursor-default'
+      }`}
       style={{
         backgroundImage: `radial-gradient(circle, #cbd5e1 0.75px, transparent 0.75px)`,
         backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
     >
+      {/* Floating Interactive Guide Banner if wire is active */}
+      {activeWire && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#0284c7] text-white px-3.5 py-1.5 rounded-full shadow-lg text-xs font-semibold flex items-center space-x-2 z-30 animate-bounce">
+          <span>
+            {activeWire.portType === 'output'
+              ? 'Conectando señal: Haz clic o suelta en el puerto de entrada de destino'
+              : 'Conectando señal: Haz clic o suelta en el puerto de salida de origen'}
+          </span>
+          <button
+            onClick={() => setActiveWire(null)}
+            className="bg-sky-800 hover:bg-sky-900 rounded-full w-4 h-4 flex items-center justify-center text-[10px]"
+            title="Cancelar"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Floating Zoom Bar */}
       <div className="absolute bottom-4 right-4 bg-[#f8f9fa] border border-[#d0d0d0] rounded shadow-md p-1 flex items-center space-x-1 z-20">
         <button
@@ -321,7 +387,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
       >
         <defs>
-          {/* Classic solid black arrowhead pointing into ports (Screenshot 2) */}
           <marker
             id="simulink-arrow"
             viewBox="0 0 10 10"
@@ -381,34 +446,20 @@ export const Canvas: React.FC<CanvasProps> = ({
                 d={pathD}
                 fill="none"
                 stroke={isSelected ? '#0284c7' : '#000000'}
-                strokeWidth={isSelected ? 2.0 : 1.3}
+                strokeWidth={isSelected ? 2.2 : 1.4}
                 markerEnd={isSelected ? 'url(#simulink-arrow-selected)' : 'url(#simulink-arrow)'}
-                className="transition-colors"
+                className="transition-colors hover:stroke-sky-600"
               />
-              {/* Signal wire label if present */}
-              {conn.label && (
-                <text
-                  x={(start.x + end.x) / 2}
-                  y={(start.y + end.y) / 2 - 4}
-                  fill="#000000"
-                  fontSize="10"
-                  fontFamily="sans-serif"
-                  fontWeight="normal"
-                  textAnchor="middle"
-                >
-                  {conn.label}
-                </text>
-              )}
             </g>
           );
         })}
 
-        {/* Junction Dots (Screenshot 2: Filled circle where lines branch) */}
+        {/* Junction Dots (where lines branch) */}
         {junctions.map((j, idx) => (
           <circle key={idx} cx={j.x} cy={j.y} r={3} fill="black" />
         ))}
 
-        {/* Live Active Wire when dragging */}
+        {/* Live Active Wire when dragging or in click-mode */}
         {activeWire && (
           <path
             d={getOrthogonalPath(
@@ -417,7 +468,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             )}
             fill="none"
             stroke="#0284c7"
-            strokeWidth={1.5}
+            strokeWidth={1.8}
             strokeDasharray="4,4"
           />
         )}
@@ -434,9 +485,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         {blocks.map((block) => {
           const isSelected = selectedBlockId === block.id;
           const isSum = block.type === 'sum';
-          const isGain = block.type === 'gain';
-          const width = isSum ? 50 : isGain ? 55 : (block.width || 70);
-          const height = isSum ? 50 : isGain ? 50 : (block.height || 54);
+          const { width, height } = getBlockDimensions(block);
           const isScope = block.type === 'scope' || block.type === 'spectrum' || block.type === 'audio_sink';
 
           return (
@@ -480,52 +529,86 @@ export const Canvas: React.FC<CanvasProps> = ({
                 </button>
               )}
 
-              {/* Block Title Placed BELOW Block (Screenshot 2: e.g. "Set Point", "Heater Blower") */}
+              {/* Block Title Placed BELOW Block */}
               <div
-                className="absolute top-full mt-1 w-32 -left-8 text-center text-[11px] font-sans text-black leading-tight pointer-events-none break-words"
+                className="absolute top-full mt-1.5 w-36 -left-9 text-center text-[11px] font-sans text-black leading-tight pointer-events-none break-words"
               >
                 {block.title || block.type}
               </div>
 
-              {/* Input Ports (Left) */}
+              {/* ================= INPUT PORTS (LEFT) ================= */}
               {block.inputs.map((port) => {
                 const portPos = getPortPosition(block, port);
-                const isHovered =
-                  activeWire && activeWire.portType === 'output' && activeWire.blockId !== block.id;
+                const isTargetCandidate = activeWire && activeWire.portType === 'output' && activeWire.blockId !== block.id;
+                const isHovered = hoveredPortInfo?.blockId === block.id && hoveredPortInfo?.portId === port.id;
 
                 return (
                   <div
                     key={port.id}
                     onMouseDown={(e) => handlePortMouseDown(e, block, port)}
                     onMouseUp={(e) => handlePortMouseUp(e, block, port)}
-                    style={{
-                      top: `${portPos.y - block.y - 4}px`,
-                      left: '-5px',
+                    onClick={(e) => {
+                      if (activeWire && activeWire.isClickMode) {
+                        e.stopPropagation();
+                        completeConnection(block, port);
+                      }
                     }}
-                    className={`absolute w-2.5 h-2.5 bg-black rounded-[1px] hover:scale-150 transition-transform cursor-pointer z-10 ${
-                      isHovered ? 'ring-2 ring-sky-500 scale-125' : ''
-                    }`}
-                    title={`Entrada: ${port.name}`}
-                  />
+                    onMouseEnter={() => setHoveredPortInfo({ blockId: block.id, portId: port.id, name: port.name })}
+                    onMouseLeave={() => setHoveredPortInfo(null)}
+                    style={{
+                      top: `${portPos.y - block.y - 10}px`,
+                      left: '-10px',
+                    }}
+                    className="absolute w-5 h-5 flex items-center justify-center cursor-crosshair z-20 group/port"
+                    title={`Puerto de Entrada: ${port.name} (Haz clic o suelta aquí para conectar)`}
+                  >
+                    {/* Generous visible port marker with pulse animation when wire is dragged */}
+                    <div
+                      className={`w-2.5 h-2.5 rounded-[1px] transition-all ${
+                        isTargetCandidate
+                          ? 'bg-[#0284c7] ring-4 ring-sky-400 scale-125 animate-pulse'
+                          : 'bg-black hover:bg-[#0284c7] hover:scale-150'
+                      } ${isHovered && isTargetCandidate ? 'bg-emerald-500 ring-4 ring-emerald-300 scale-150' : ''}`}
+                    />
+                  </div>
                 );
               })}
 
-              {/* Output Ports (Right) */}
+              {/* ================= OUTPUT PORTS (RIGHT) ================= */}
               {block.outputs.map((port) => {
                 const portPos = getPortPosition(block, port);
+                const isTargetCandidate = activeWire && activeWire.portType === 'input' && activeWire.blockId !== block.id;
+                const isHovered = hoveredPortInfo?.blockId === block.id && hoveredPortInfo?.portId === port.id;
 
                 return (
                   <div
                     key={port.id}
                     onMouseDown={(e) => handlePortMouseDown(e, block, port)}
                     onMouseUp={(e) => handlePortMouseUp(e, block, port)}
-                    style={{
-                      top: `${portPos.y - block.y - 4}px`,
-                      right: '-5px',
+                    onClick={(e) => {
+                      if (activeWire && activeWire.isClickMode) {
+                        e.stopPropagation();
+                        completeConnection(block, port);
+                      }
                     }}
-                    className="absolute w-2.5 h-2.5 bg-black rounded-[1px] hover:scale-150 transition-transform cursor-pointer z-10 hover:bg-sky-600"
-                    title={`Salida: ${port.name}`}
-                  />
+                    onMouseEnter={() => setHoveredPortInfo({ blockId: block.id, portId: port.id, name: port.name })}
+                    onMouseLeave={() => setHoveredPortInfo(null)}
+                    style={{
+                      top: `${portPos.y - block.y - 10}px`,
+                      right: '-10px',
+                    }}
+                    className="absolute w-5 h-5 flex items-center justify-center cursor-crosshair z-20 group/port"
+                    title={`Puerto de Salida: ${port.name} (Haz clic o arrastra para sacar cable de unión)`}
+                  >
+                    {/* Generous visible port marker */}
+                    <div
+                      className={`w-2.5 h-2.5 rounded-[1px] transition-all ${
+                        isTargetCandidate
+                          ? 'bg-[#0284c7] ring-4 ring-sky-400 scale-125 animate-pulse'
+                          : 'bg-black hover:bg-[#0284c7] hover:scale-150'
+                      } ${isHovered && isTargetCandidate ? 'bg-emerald-500 ring-4 ring-emerald-300 scale-150' : ''}`}
+                    />
+                  </div>
                 );
               })}
             </div>
