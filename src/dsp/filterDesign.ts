@@ -225,13 +225,15 @@ export function computeFrequencyResponse(
   b: Float64Array,
   a: Float64Array,
   fs: number,
-  numPoints: number = 256
+  numPoints: number = 256,
+  maxFreq?: number
 ): { freqs: Float64Array; magDb: Float64Array; phaseDeg: Float64Array } {
   const freqs = new Float64Array(numPoints);
   const magDb = new Float64Array(numPoints);
   const phaseDeg = new Float64Array(numPoints);
 
-  const df = (fs / 2) / (numPoints - 1);
+  const fEnd = maxFreq ? Math.min(fs / 2, Math.max(1, maxFreq)) : fs / 2;
+  const df = fEnd / (numPoints - 1);
 
   for (let i = 0; i < numPoints; i++) {
     const f = i * df;

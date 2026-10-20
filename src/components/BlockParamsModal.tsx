@@ -32,6 +32,7 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
 
   // Canvas ref for filter frequency response preview
   const freqCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [filterZoomMax, setFilterZoomMax] = useState<number | null>(null);
 
   useEffect(() => {
     setTitle(block.title || def?.name || '');
@@ -93,7 +94,8 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
       }
     }
 
-    const { freqs, magDb } = computeFrequencyResponse(bCoeffs, aCoeffs, fs, 256);
+    const maxPlotFreq = filterZoomMax ? Math.min(fs / 2, filterZoomMax) : fs / 2;
+    const { freqs, magDb } = computeFrequencyResponse(bCoeffs, aCoeffs, fs, 256, maxPlotFreq);
 
     // Draw Response
     const w = canvas.width;
@@ -136,8 +138,12 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
     ctx.fillStyle = '#cbd5e1';
     ctx.font = '10px monospace';
     ctx.fillText(`0 Hz`, 4, h - 4);
-    ctx.fillText(`Nyquist (${(fs / 2).toFixed(0)} Hz)`, w - 120, h - 4);
-  }, [isOpen, block.type, params, fs]);
+    ctx.fillText(
+      filterZoomMax ? `Rango: ${maxPlotFreq.toFixed(0)} Hz` : `Nyquist (${(fs / 2).toFixed(0)} Hz)`,
+      w - 125,
+      h - 4
+    );
+  }, [isOpen, block.type, params, fs, filterZoomMax]);
 
   // Audio WAV file upload
   const handleWavUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -510,9 +516,61 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
 
                 {/* Live Bode / Magnitude Response */}
                 <div>
-                  <div className="text-[11px] font-semibold text-slate-400 mb-1 flex items-center justify-between">
+                  <div className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center justify-between">
                     <span>Respuesta en Frecuencia |H(e^jω)| (dB)</span>
-                    <span className="font-mono text-purple-400 text-[10px]">Fs = {fs} Hz</span>
+                    <div className="flex items-center space-x-1">
+                      <span className="text-[10px] text-slate-500">Zoom:</span>
+                      <button
+                        type="button"
+                        onClick={() => setFilterZoomMax(null)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                          filterZoomMax === null
+                            ? 'bg-purple-600 text-white font-bold'
+                            : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Todo
+                      </button>
+                      {fs / 2 > 50 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(50)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 50
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          50Hz
+                        </button>
+                      )}
+                      {fs / 2 > 100 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(100)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 100
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          100Hz
+                        </button>
+                      )}
+                      {fs / 2 > 250 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(250)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 250
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          250Hz
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <canvas
                     ref={freqCanvasRef}
@@ -611,12 +669,70 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
                 )}
 
                 {/* Magnitude response canvas */}
-                <canvas
-                  ref={freqCanvasRef}
-                  width={480}
-                  height={110}
-                  className="w-full h-28 rounded border border-slate-800 bg-slate-950"
-                />
+                <div>
+                  <div className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center justify-between">
+                    <span>Respuesta en Frecuencia |H(e^jω)| (dB)</span>
+                    <div className="flex items-center space-x-1">
+                      <span className="text-[10px] text-slate-500">Zoom:</span>
+                      <button
+                        type="button"
+                        onClick={() => setFilterZoomMax(null)}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                          filterZoomMax === null
+                            ? 'bg-purple-600 text-white font-bold'
+                            : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Todo
+                      </button>
+                      {fs / 2 > 50 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(50)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 50
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          50Hz
+                        </button>
+                      )}
+                      {fs / 2 > 100 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(100)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 100
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          100Hz
+                        </button>
+                      )}
+                      {fs / 2 > 250 && (
+                        <button
+                          type="button"
+                          onClick={() => setFilterZoomMax(250)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition ${
+                            filterZoomMax === 250
+                              ? 'bg-purple-600 text-white font-bold'
+                              : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          250Hz
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <canvas
+                    ref={freqCanvasRef}
+                    width={480}
+                    height={110}
+                    className="w-full h-28 rounded border border-slate-800 bg-slate-950"
+                  />
+                </div>
               </div>
             )}
 
