@@ -3,6 +3,7 @@ import { BlockInstance, Connection, SimulationConfig, SimulationResult } from '.
 import { BLOCK_DEFINITIONS } from './engine/blocks';
 import { runSimulation } from './engine/simulationEngine';
 import { PRESETS } from './engine/presets';
+import { decodeAudioFile } from './dsp/audioUtils';
 
 import { Navbar } from './components/Navbar';
 import { Canvas } from './components/Canvas';
@@ -11,10 +12,15 @@ import { ScopeModal } from './components/ScopeModal';
 import { AudioPlayerModal } from './components/AudioPlayerModal';
 import { HelpModal } from './components/HelpModal';
 import { LibraryBrowserModal } from './components/LibraryBrowserModal';
+import { LibraryBrowserSidebar } from './components/LibraryBrowserSidebar';
 
 export const App: React.FC = () => {
-  // Preset 0 as initial state
-  const [config, setConfig] = useState<SimulationConfig>({ ...PRESETS[0].config });
+  // Preset 0 as initial state with default Fs = 1000 Hz
+  const [config, setConfig] = useState<SimulationConfig>({
+    fs: 1000,
+    duration: 2.0,
+    timeStep: 1 / 1000,
+  });
   const [blocks, setBlocks] = useState<BlockInstance[]>([...PRESETS[0].blocks]);
   const [connections, setConnections] = useState<Connection[]>([...PRESETS[0].connections]);
 
@@ -23,11 +29,43 @@ export const App: React.FC = () => {
   const [activeScopeBlock, setActiveScopeBlock] = useState<BlockInstance | null>(null);
   const [activeAudioBlock, setActiveAudioBlock] = useState<BlockInstance | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-  const [isLibraryBrowserOpen, setIsLibraryBrowserOpen] = useState(false);
+
+  // Library Browser sidepane (docked to left, defaults to open, matches Simulink Model Browser screenshot)
+  const [isLibraryBrowserOpen, setIsLibraryBrowserOpen] = useState(true);
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
 
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [lastExecutionTime, setLastExecutionTime] = useState<number | undefined>(undefined);
+
+  // Auto-load ECG demo signal into memory on startup
+  useEffect(() => {
+    fetch('./ecg_signal.wav')
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (!blob) return;
+        decodeAudioFile(blob).then((decoded) => {
+          // Pre-populate any initial wav_source block with ECG samples
+          setBlocks((prev) =>
+            prev.map((b) =>
+              b.type === 'wav_source'
+                ? {
+                    ...b,
+                    params: {
+                      ...b.params,
+                      fileName: 'ecg_signal.wav',
+                      sampleRate: decoded.sampleRate,
+                      duration: decoded.duration,
+                      audioData: decoded.samples,
+                    },
+                  }
+                : b
+            )
+          );
+        });
+      })
+      .catch((e) => console.log('ECG pre-load notice:', e));
+  }, []);
 
   // Execute simulation
   const handleRunSimulation = useCallback(() => {
@@ -45,7 +83,10 @@ export const App: React.FC = () => {
 
   // Initial simulation run on load
   useEffect(() => {
-    handleRunSimulation();
+    const timer = setTimeout(() => {
+      handleRunSimulation();
+    }, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   // Shortcut Ctrl+Enter
@@ -70,8 +111,8 @@ export const App: React.FC = () => {
       id: newId,
       type,
       title: def.name,
-      x: x !== undefined ? x : 300 + (blocks.length % 6) * 40,
-      y: y !== undefined ? y : 150 + (blocks.length % 6) * 30,
+      x: x !== undefined ? x : 340 + (blocks.length % 5) * 40,
+      y: y !== undefined ? y : 150 + (blocks.length % 5) * 30,
       params: { ...def.defaultParams },
       inputs: [...def.inputs],
       outputs: [...def.outputs],
@@ -197,7 +238,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-white font-sans text-slate-900 select-none">
-      {/* MATLAB Simulink Classic Top Navigation & Toolbar (Screenshot 2) */}
+      {/* MATLAB Simulink Classic Top Navigation & Toolbar */}
       <Navbar
         config={config}
         onConfigChange={setConfig}
@@ -208,13 +249,23 @@ export const App: React.FC = () => {
         onLoad={handleLoadModel}
         onSelectPreset={handleSelectPreset}
         onOpenHelp={() => setIsHelpOpen(true)}
-        onOpenLibraryBrowser={() => setIsLibraryBrowserOpen(true)}
+        onOpenLibraryBrowser={() => setIsLibraryBrowserOpen((prev) => !prev)}
         isSimulating={isSimulating}
         lastExecutionTime={lastExecutionTime}
       />
 
-      {/* Main Canvas Workspace */}
+      {/* Main Workspace (Left Library Browser Sidepane + Center Canvas) */}
       <div className="flex flex-1 overflow-hidden relative">
+        {/* Docked Library Browser on the left (Screenshot 3: Model Browser sidepane) */}
+        {isLibraryBrowserOpen && (
+          <LibraryBrowserSidebar
+            isOpen={isLibraryBrowserOpen}
+            onClose={() => setIsLibraryBrowserOpen(false)}
+            onAddBlock={(type) => handleAddBlock(type)}
+          />
+        )}
+
+        {/* Center Simulation Canvas */}
         <Canvas
           blocks={blocks}
           connections={connections}
@@ -230,9 +281,9 @@ export const App: React.FC = () => {
         />
       </div>
 
-      {/* Classic Simulink Status Bar (Screenshot 2: Ready | 100% | ode45) */}
+      {/* Classic Simulink Status Bar (Screenshot 2 & 3: Ready | 100% | ode45) */}
       <footer className="h-6 bg-[#f0f0f0] border-t border-[#c0c0c0] px-3 flex items-center justify-between text-[11px] font-sans text-slate-700">
-        <div className="w-32 flex items-center space-x-1.5">
+        <div className="w-48 flex items-center space-x-2">
           <div
             className={`w-2 h-2 rounded-full ${
               isSimulating ? 'bg-amber-500 animate-ping' : 'bg-emerald-600'
@@ -241,6 +292,7 @@ export const App: React.FC = () => {
           <span className="font-semibold text-slate-800">
             {isSimulating ? 'Running...' : 'Ready'}
           </span>
+          <span className="text-[10px] text-slate-500 font-mono">Fs={config.fs}Hz</span>
         </div>
 
         {/* Center: Progress Bar */}
@@ -252,17 +304,19 @@ export const App: React.FC = () => {
         </div>
 
         {/* Right: Solver status */}
-        <div className="w-32 text-right font-mono text-[11px] text-slate-800">
+        <div className="w-48 text-right font-mono text-[11px] text-slate-800">
           ode45 / Dormand-Prince
         </div>
       </footer>
 
-      {/* Simulink Library Browser (Screenshot 1) */}
-      <LibraryBrowserModal
-        isOpen={isLibraryBrowserOpen}
-        onClose={() => setIsLibraryBrowserOpen(false)}
-        onAddBlock={(type) => handleAddBlock(type)}
-      />
+      {/* Floating Library Browser Modal (Optional pop-out) */}
+      {isLibraryModalOpen && (
+        <LibraryBrowserModal
+          isOpen={isLibraryModalOpen}
+          onClose={() => setIsLibraryModalOpen(false)}
+          onAddBlock={(type) => handleAddBlock(type)}
+        />
+      )}
 
       {/* Block Parameter Modal */}
       {editingBlock && (

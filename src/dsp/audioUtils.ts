@@ -1,5 +1,6 @@
 /**
- * Audio Utilities: WAV Encoding/Decoding and Real-Time Playback
+ * Audio Utilities: WAV Encoding/Decoding (with support for scientific sample rates like 1000 Hz, 360 Hz, 250 Hz)
+ * and Real-Time Playback
  */
 
 let globalAudioCtx: AudioContext | null = null;
@@ -16,30 +17,139 @@ export function getAudioContext(): AudioContext {
 }
 
 /**
- * Decodes an uploaded audio file (WAV, MP3, etc.) into a normalized mono Float64Array.
+ * Direct PCM WAV parser that decodes any sampling rate (including 1000 Hz, 360 Hz, 250 Hz).
+ * Browser's native AudioContext.decodeAudioData rejects sample rates under 3000 Hz with DOMException;
+ * this parser runs in pure JavaScript and handles 8-bit, 16-bit, 24-bit, 32-bit integer and 32-bit float WAVs.
  */
-export async function decodeAudioFile(file: File | Blob): Promise<{ samples: Float64Array; sampleRate: number; duration: number }> {
-  const ctx = getAudioContext();
-  const arrayBuffer = await file.arrayBuffer();
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+export function parseWavArrayBuffer(arrayBuffer: ArrayBuffer): { samples: Float64Array; sampleRate: number; duration: number } {
+  const view = new DataView(arrayBuffer);
 
-  // Convert to mono
-  const numChannels = audioBuffer.numberOfChannels;
-  const length = audioBuffer.length;
-  const monoSamples = new Float64Array(length);
-
-  for (let c = 0; c < numChannels; c++) {
-    const channelData = audioBuffer.getChannelData(c);
-    for (let i = 0; i < length; i++) {
-      monoSamples[i] += channelData[i] / numChannels;
-    }
+  // Check RIFF and WAVE header
+  if (view.byteLength < 44) {
+    throw new Error('Archivo demasiado pequeño para ser un archivo WAV válido.');
   }
 
-  return {
-    samples: monoSamples,
-    sampleRate: audioBuffer.sampleRate,
-    duration: audioBuffer.duration,
-  };
+  const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+
+  if (riff !== 'RIFF' || wave !== 'WAVE') {
+    throw new Error('El archivo no tiene cabecera RIFF/WAVE válida.');
+  }
+
+  let offset = 12;
+  let audioFormat = 1; // 1 = PCM, 3 = IEEE float
+  let numChannels = 1;
+  let sampleRate = 1000;
+  let bitsPerSample = 16;
+  let dataOffset = 0;
+  let dataSize = 0;
+
+  while (offset + 8 <= view.byteLength) {
+    const chunkId = String.fromCharCode(
+      view.getUint8(offset),
+      view.getUint8(offset + 1),
+      view.getUint8(offset + 2),
+      view.getUint8(offset + 3)
+    );
+    const chunkSize = view.getUint32(offset + 4, true);
+
+    if (chunkId === 'fmt ') {
+      audioFormat = view.getUint16(offset + 8, true);
+      numChannels = view.getUint16(offset + 10, true);
+      sampleRate = view.getUint32(offset + 12, true);
+      bitsPerSample = view.getUint16(offset + 22, true);
+    } else if (chunkId === 'data') {
+      dataOffset = offset + 8;
+      dataSize = Math.min(chunkSize, view.byteLength - dataOffset);
+      break;
+    }
+    offset += 8 + chunkSize;
+  }
+
+  if (dataOffset === 0 || dataSize <= 0) {
+    throw new Error('No se encontró el bloque de datos (data chunk) en el archivo WAV.');
+  }
+
+  const bytesPerSample = Math.max(1, Math.floor(bitsPerSample / 8));
+  const numSamples = Math.floor(dataSize / (bytesPerSample * numChannels));
+  const samples = new Float64Array(numSamples);
+
+  let p = dataOffset;
+  for (let i = 0; i < numSamples; i++) {
+    let sum = 0;
+    for (let c = 0; c < numChannels; c++) {
+      let val = 0;
+      if (bitsPerSample === 16) {
+        val = view.getInt16(p, true) / 32768.0;
+        p += 2;
+      } else if (bitsPerSample === 8) {
+        val = (view.getUint8(p) - 128) / 128.0;
+        p += 1;
+      } else if (bitsPerSample === 24) {
+        // 24-bit signed little-endian
+        const b0 = view.getUint8(p);
+        const b1 = view.getUint8(p + 1);
+        const b2 = view.getInt8(p + 2); // sign-extended
+        val = ((b2 << 16) | (b1 << 8) | b0) / 8388608.0;
+        p += 3;
+      } else if (bitsPerSample === 32 && audioFormat === 3) {
+        // 32-bit float
+        val = view.getFloat32(p, true);
+        p += 4;
+      } else if (bitsPerSample === 32) {
+        // 32-bit integer
+        val = view.getInt32(p, true) / 2147483648.0;
+        p += 4;
+      } else {
+        // Fallback 16-bit
+        val = view.getInt16(p, true) / 32768.0;
+        p += 2;
+      }
+      sum += val;
+    }
+    samples[i] = sum / numChannels;
+  }
+
+  const duration = numSamples / Math.max(1, sampleRate);
+  return { samples, sampleRate, duration };
+}
+
+/**
+ * Decodes an uploaded audio or biomedical signal file (WAV, MP3, etc.)
+ * Tries direct PCM WAV parsing first (to support 1000 Hz, 360 Hz, etc.), and falls back to Web Audio API.
+ */
+export async function decodeAudioFile(file: File | Blob): Promise<{ samples: Float64Array; sampleRate: number; duration: number }> {
+  const arrayBuffer = await file.arrayBuffer();
+
+  // Try pure TypeScript WAV parsing first (guarantees support for low sample rates like 1000 Hz)
+  try {
+    return parseWavArrayBuffer(arrayBuffer);
+  } catch (wavErr) {
+    // If it's not a standard PCM WAV (e.g. MP3, OGG, compressed), fall back to browser decodeAudioData
+    try {
+      const ctx = getAudioContext();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+
+      const numChannels = audioBuffer.numberOfChannels;
+      const length = audioBuffer.length;
+      const monoSamples = new Float64Array(length);
+
+      for (let c = 0; c < numChannels; c++) {
+        const channelData = audioBuffer.getChannelData(c);
+        for (let i = 0; i < length; i++) {
+          monoSamples[i] += channelData[i] / numChannels;
+        }
+      }
+
+      return {
+        samples: monoSamples,
+        sampleRate: audioBuffer.sampleRate,
+        duration: audioBuffer.duration,
+      };
+    } catch (browserErr: any) {
+      throw new Error(`Error al leer archivo de audio/señal: ${wavErr instanceof Error ? wavErr.message : browserErr?.message || browserErr}`);
+    }
+  }
 }
 
 /**
@@ -68,7 +178,7 @@ export function resampleSignal(
     if (idx0 < samples.length) {
       result[i] = samples[idx0] * (1 - frac) + samples[idx1] * frac;
     } else {
-      result[i] = 0; // zero-pad if target duration exceeds file length
+      result[i] = 0;
     }
   }
 
@@ -77,6 +187,7 @@ export function resampleSignal(
 
 /**
  * Audio playback controller for simulated signal buffers.
+ * Automatically upsamples low-rate signals (e.g. 1000 Hz) to the browser's audio sample rate (e.g. 44100 Hz).
  */
 export class AudioSignalPlayer {
   private ctx: AudioContext;
@@ -91,7 +202,6 @@ export class AudioSignalPlayer {
   }
 
   public setVolume(volume: number) {
-    // volume: 0.0 to 1.0
     this.gainNode.gain.setValueAtTime(Math.max(0, Math.min(volume, 1)), this.ctx.currentTime);
   }
 
@@ -107,7 +217,6 @@ export class AudioSignalPlayer {
     const audioBuffer = this.ctx.createBuffer(1, resampled.length, ctxFs);
     const channelData = audioBuffer.getChannelData(0);
 
-    // Normalize or soft-clip if peak > 1.0 to prevent harsh distortion
     let peak = 0;
     for (let i = 0; i < resampled.length; i++) {
       const absVal = Math.abs(resampled[i]);
@@ -140,7 +249,7 @@ export class AudioSignalPlayer {
         this.currentSource.stop();
         this.currentSource.disconnect();
       } catch (e) {
-        // ignore if already stopped
+        // ignore
       }
       this.currentSource = null;
     }
@@ -166,29 +275,24 @@ export function exportToWavBlob(samples: Float64Array, fs: number): Blob {
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
-  // RIFF Chunk Descriptor
   writeString(view, 0, 'RIFF');
   view.setUint32(4, 36 + dataSize, true);
   writeString(view, 8, 'WAVE');
 
-  // "fmt " sub-chunk
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
-  view.setUint16(20, 1, true); // AudioFormat (1 for PCM)
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
   view.setUint16(22, numChannels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitsPerSample, true);
 
-  // "data" sub-chunk
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Write PCM samples (16-bit signed integer)
   let offset = 44;
   for (let i = 0; i < samples.length; i++) {
-    // Clamp to [-1.0, 1.0]
     const s = Math.max(-1, Math.min(1, samples[i]));
     const intSample = s < 0 ? s * 0x8000 : s * 0x7fff;
     view.setInt16(offset, intSample, true);

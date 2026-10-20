@@ -151,7 +151,22 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
       handleChange('sampleRate', decoded.sampleRate);
       handleChange('duration', decoded.duration);
     } catch (err: any) {
-      alert(`Error al decodificar audio: ${err?.message || err}`);
+      alert(`Error al decodificar audio/señal: ${err?.message || err}`);
+    }
+  };
+
+  const handleLoadEcgDemo = async () => {
+    try {
+      const response = await fetch('./ecg_signal.wav');
+      if (!response.ok) throw new Error('No se pudo cargar el archivo ecg_signal.wav local.');
+      const blob = await response.blob();
+      const decoded = await decodeAudioFile(blob);
+      handleChange('fileName', 'ecg_signal.wav');
+      handleChange('audioData', decoded.samples);
+      handleChange('sampleRate', decoded.sampleRate);
+      handleChange('duration', decoded.duration);
+    } catch (err: any) {
+      alert(`Error al cargar muestra ECG: ${err?.message || err}`);
     }
   };
 
@@ -305,18 +320,28 @@ export const BlockParamsModal: React.FC<BlockParamsModalProps> = ({
             {/* ================= WAV AUDIO SOURCE ================= */}
             {block.type === 'wav_source' && (
               <div className="space-y-3 bg-slate-950 p-3.5 rounded-lg border border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-200">Archivo de Audio Local</span>
-                  <label className="cursor-pointer flex items-center space-x-1.5 px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-medium transition text-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Seleccionar .WAV / .MP3</span>
-                    <input
-                      type="file"
-                      accept="audio/*"
-                      onChange={handleWavUpload}
-                      className="hidden"
-                    />
-                  </label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-200">Archivo de Señal / Audio</span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleLoadEcgDemo}
+                      className="flex items-center space-x-1 px-2.5 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition text-xs"
+                      title="Cargar la señal ecg_signal.wav (1000 Hz) con 1 clic"
+                    >
+                      <span>Cargar Demo ECG (1000 Hz)</span>
+                    </button>
+                    <label className="cursor-pointer flex items-center space-x-1.5 px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white font-medium transition text-xs">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Subir .WAV</span>
+                      <input
+                        type="file"
+                        accept=".wav,.mp3,audio/*"
+                        onChange={handleWavUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 {params.fileName ? (
