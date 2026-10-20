@@ -13,5 +13,12 @@
   </head>
   <body class="bg-slate-900 text-slate-100 antialiased overflow-hidden select-none">
     <div id="root"></div>
+    <script>
+      // Redirigir a /docs/ únicamente si se sirve el archivo fuente sin compilar en GitHub Pages (branch root)
+      if (window.location.hostname.endsWith('github.io') && document.querySelector('script[src*="main.tsx"]')) {
+        var base = window.location.pathname.replace(/\/?$/, '/docs/');
+        window.location.replace(base + window.location.search + window.location.hash);
+      }
+    </script>
   </body>
 </html>
