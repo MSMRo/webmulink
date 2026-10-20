@@ -45,6 +45,7 @@ export interface Connection {
   fromPortId: string;
   toBlockId: string;
   toPortId: string;
+  label?: string;
 }
 
 export interface SimulationConfig {

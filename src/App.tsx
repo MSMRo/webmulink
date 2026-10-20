@@ -5,15 +5,15 @@ import { runSimulation } from './engine/simulationEngine';
 import { PRESETS } from './engine/presets';
 
 import { Navbar } from './components/Navbar';
-import { Sidebar } from './components/Sidebar';
 import { Canvas } from './components/Canvas';
 import { BlockParamsModal } from './components/BlockParamsModal';
 import { ScopeModal } from './components/ScopeModal';
 import { AudioPlayerModal } from './components/AudioPlayerModal';
 import { HelpModal } from './components/HelpModal';
+import { LibraryBrowserModal } from './components/LibraryBrowserModal';
 
 export const App: React.FC = () => {
-  // Initial state with Preset 0 (FIR filter noise cancellation demo)
+  // Preset 0 as initial state
   const [config, setConfig] = useState<SimulationConfig>({ ...PRESETS[0].config });
   const [blocks, setBlocks] = useState<BlockInstance[]>([...PRESETS[0].blocks]);
   const [connections, setConnections] = useState<Connection[]>([...PRESETS[0].connections]);
@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   const [activeScopeBlock, setActiveScopeBlock] = useState<BlockInstance | null>(null);
   const [activeAudioBlock, setActiveAudioBlock] = useState<BlockInstance | null>(null);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isLibraryBrowserOpen, setIsLibraryBrowserOpen] = useState(false);
 
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -35,10 +36,6 @@ export const App: React.FC = () => {
       const res = runSimulation(blocks, connections, config);
       setSimulationResult(res);
       setLastExecutionTime(res.executionTimeMs);
-
-      if (res.errors && res.errors.length > 0) {
-        console.warn('Advertencias durante la simulación:', res.errors);
-      }
     } catch (err) {
       console.error('Error al ejecutar la simulación:', err);
     } finally {
@@ -46,12 +43,12 @@ export const App: React.FC = () => {
     }
   }, [blocks, connections, config]);
 
-  // Run automatically on first mount
+  // Initial simulation run on load
   useEffect(() => {
     handleRunSimulation();
   }, []);
 
-  // Keyboard shortcut Ctrl+Enter to run
+  // Shortcut Ctrl+Enter
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -63,7 +60,7 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleRunSimulation]);
 
-  // Add block to canvas
+  // Add block
   const handleAddBlock = (type: string, x?: number, y?: number) => {
     const def = BLOCK_DEFINITIONS[type];
     if (!def) return;
@@ -73,8 +70,8 @@ export const App: React.FC = () => {
       id: newId,
       type,
       title: def.name,
-      x: x !== undefined ? x : 350 + (blocks.length % 5) * 40,
-      y: y !== undefined ? y : 150 + (blocks.length % 5) * 40,
+      x: x !== undefined ? x : 300 + (blocks.length % 6) * 40,
+      y: y !== undefined ? y : 150 + (blocks.length % 6) * 30,
       params: { ...def.defaultParams },
       inputs: [...def.inputs],
       outputs: [...def.outputs],
@@ -84,19 +81,16 @@ export const App: React.FC = () => {
     setSelectedBlockId(newId);
   };
 
-  // Update block position
   const handleUpdateBlockPosition = (id: string, x: number, y: number) => {
     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, x, y } : b)));
   };
 
-  // Delete block and attached wires
   const handleDeleteBlock = (id: string) => {
     setBlocks((prev) => prev.filter((b) => b.id !== id));
     setConnections((prev) => prev.filter((c) => c.fromBlockId !== id && c.toBlockId !== id));
     if (selectedBlockId === id) setSelectedBlockId(null);
   };
 
-  // Add wire connection
   const handleAddConnection = (conn: Omit<Connection, 'id'>) => {
     const newConn: Connection = {
       ...conn,
@@ -105,19 +99,16 @@ export const App: React.FC = () => {
     setConnections((prev) => [...prev, newConn]);
   };
 
-  // Delete wire connection
   const handleDeleteConnection = (id: string) => {
     setConnections((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // Save params from modal
   const handleSaveParams = (blockId: string, newTitle: string, newParams: Record<string, any>) => {
     setBlocks((prev) =>
       prev.map((b) => (b.id === blockId ? { ...b, title: newTitle, params: newParams } : b))
     );
   };
 
-  // Load a predefined DSP preset
   const handleSelectPreset = (index: number) => {
     const preset = PRESETS[index];
     if (!preset) return;
@@ -126,7 +117,6 @@ export const App: React.FC = () => {
     setConnections([...preset.connections]);
     setSelectedBlockId(null);
 
-    // Run automatically after loading preset
     setTimeout(() => {
       const res = runSimulation(preset.blocks, preset.connections, preset.config);
       setSimulationResult(res);
@@ -134,13 +124,11 @@ export const App: React.FC = () => {
     }, 50);
   };
 
-  // Reset simulation
   const handleReset = () => {
     setSimulationResult(null);
     setLastExecutionTime(undefined);
   };
 
-  // Clear diagram
   const handleClear = () => {
     if (blocks.length === 0) return;
     if (window.confirm('¿Deseas vaciar todo el lienzo y borrar todos los bloques y conexiones?')) {
@@ -151,7 +139,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // Save model as JSON file
   const handleSaveModel = () => {
     const modelData = {
       version: '1.0.0',
@@ -164,12 +151,11 @@ export const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Webmulink_Model_${Date.now()}.json`;
+    a.download = `Simulink_Model_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Load model from JSON file
   const handleLoadModel = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -201,7 +187,6 @@ export const App: React.FC = () => {
     input.click();
   };
 
-  // Open Scope or Audio Player modal depending on block type
   const handleOpenScopeModal = (block: BlockInstance) => {
     if (block.type === 'audio_sink') {
       setActiveAudioBlock(block);
@@ -211,8 +196,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 font-sans text-slate-100">
-      {/* Top Navigation Bar */}
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-white font-sans text-slate-900 select-none">
+      {/* MATLAB Simulink Classic Top Navigation & Toolbar (Screenshot 2) */}
       <Navbar
         config={config}
         onConfigChange={setConfig}
@@ -223,14 +208,13 @@ export const App: React.FC = () => {
         onLoad={handleLoadModel}
         onSelectPreset={handleSelectPreset}
         onOpenHelp={() => setIsHelpOpen(true)}
+        onOpenLibraryBrowser={() => setIsLibraryBrowserOpen(true)}
         isSimulating={isSimulating}
         lastExecutionTime={lastExecutionTime}
       />
 
-      {/* Main Workspace (Sidebar + Canvas) */}
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar onAddBlock={(type) => handleAddBlock(type)} />
-
+      {/* Main Canvas Workspace */}
+      <div className="flex flex-1 overflow-hidden relative">
         <Canvas
           blocks={blocks}
           connections={connections}
@@ -246,7 +230,41 @@ export const App: React.FC = () => {
         />
       </div>
 
-      {/* Modals */}
+      {/* Classic Simulink Status Bar (Screenshot 2: Ready | 100% | ode45) */}
+      <footer className="h-6 bg-[#f0f0f0] border-t border-[#c0c0c0] px-3 flex items-center justify-between text-[11px] font-sans text-slate-700">
+        <div className="w-32 flex items-center space-x-1.5">
+          <div
+            className={`w-2 h-2 rounded-full ${
+              isSimulating ? 'bg-amber-500 animate-ping' : 'bg-emerald-600'
+            }`}
+          />
+          <span className="font-semibold text-slate-800">
+            {isSimulating ? 'Running...' : 'Ready'}
+          </span>
+        </div>
+
+        {/* Center: Progress Bar */}
+        <div className="flex items-center space-x-2">
+          <div className="w-48 h-3 bg-[#e0e0e0] border border-[#a0a0a0] rounded-xs p-0.5">
+            <div className="w-full h-full bg-[#0055ea]" />
+          </div>
+          <span className="text-[10px] font-mono font-bold text-slate-800">100%</span>
+        </div>
+
+        {/* Right: Solver status */}
+        <div className="w-32 text-right font-mono text-[11px] text-slate-800">
+          ode45 / Dormand-Prince
+        </div>
+      </footer>
+
+      {/* Simulink Library Browser (Screenshot 1) */}
+      <LibraryBrowserModal
+        isOpen={isLibraryBrowserOpen}
+        onClose={() => setIsLibraryBrowserOpen(false)}
+        onAddBlock={(type) => handleAddBlock(type)}
+      />
+
+      {/* Block Parameter Modal */}
       {editingBlock && (
         <BlockParamsModal
           block={editingBlock}
@@ -257,6 +275,7 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* Time & Frequency Scopes */}
       {activeScopeBlock && (
         <ScopeModal
           block={activeScopeBlock}
@@ -268,6 +287,7 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* Audio Player Modal */}
       {activeAudioBlock && (
         <AudioPlayerModal
           block={activeAudioBlock}
@@ -278,6 +298,7 @@ export const App: React.FC = () => {
         />
       )}
 
+      {/* Help Modal */}
       <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </div>
   );

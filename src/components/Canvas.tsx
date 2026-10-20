@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { BlockInstance, Connection, Port } from '../types';
 import { BLOCK_DEFINITIONS } from '../engine/blocks';
-import { ZoomIn, ZoomOut, Maximize2, X, Settings2, ExternalLink } from 'lucide-react';
+import { renderSimulinkGlyph } from './LibraryBrowserModal';
+import { ZoomIn, ZoomOut, Maximize2, Settings2, X, ExternalLink } from 'lucide-react';
 
 interface CanvasProps {
   blocks: BlockInstance[];
@@ -44,7 +45,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   // Transform state: pan & zoom
   const [zoom, setZoom] = useState(1.0);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [pan, setPan] = useState({ x: 40, y: 40 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
@@ -56,18 +57,17 @@ export const Canvas: React.FC<CanvasProps> = ({
   const [activeWire, setActiveWire] = useState<DraggingPort | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
 
-  // Handle Zoom with Mouse Wheel
+  // Zoom with Mouse Wheel
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.35), 2.2);
+    const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.4), 2.2);
 
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // Adjust pan to zoom towards mouse position
       const dx = mouseX - pan.x;
       const dy = mouseY - pan.y;
       setPan({
@@ -78,7 +78,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Convert client coordinates to canvas world coordinates
   const clientToWorld = useCallback(
     (clientX: number, clientY: number) => {
       if (!containerRef.current) return { x: 0, y: 0 };
@@ -91,7 +90,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     [pan, zoom]
   );
 
-  // Background Mouse Down for Panning
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0 && e.target === containerRef.current) {
       setIsPanning(true);
@@ -112,7 +110,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     if (draggingBlockId) {
       const worldPos = clientToWorld(e.clientX, e.clientY);
-      const newX = Math.round((worldPos.x - dragOffset.x) / 10) * 10; // Snap to 10px grid
+      const newX = Math.round((worldPos.x - dragOffset.x) / 10) * 10;
       const newY = Math.round((worldPos.y - dragOffset.y) / 10) * 10;
       onUpdateBlockPosition(draggingBlockId, newX, newY);
       return;
@@ -130,7 +128,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     setActiveWire(null);
   };
 
-  // Start dragging a block
   const handleBlockMouseDown = (e: React.MouseEvent, block: BlockInstance) => {
     e.stopPropagation();
     onSelectBlock(block.id);
@@ -144,7 +141,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
-  // Start drawing a wire from a port
   const handlePortMouseDown = (e: React.MouseEvent, block: BlockInstance, port: Port) => {
     e.stopPropagation();
     const portPos = getPortPosition(block, port);
@@ -159,17 +155,14 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
-  // Complete wire connection on target port
   const handlePortMouseUp = (e: React.MouseEvent, targetBlock: BlockInstance, targetPort: Port) => {
     e.stopPropagation();
     if (!activeWire) return;
 
-    // Check compatibility: cannot connect output to output or input to input
     if (activeWire.blockId !== targetBlock.id && activeWire.portType !== targetPort.type) {
       const from = activeWire.portType === 'output' ? activeWire : { blockId: targetBlock.id, portId: targetPort.id };
       const to = activeWire.portType === 'input' ? activeWire : { blockId: targetBlock.id, portId: targetPort.id };
 
-      // Avoid duplicate connections to same input port
       const existing = connections.find((c) => c.toBlockId === to.blockId && c.toPortId === to.portId);
       if (existing) {
         onDeleteConnection(existing.id);
@@ -186,7 +179,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     setActiveWire(null);
   };
 
-  // Drag and Drop from Sidebar
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
@@ -201,10 +193,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
-  // Helper to calculate exact port coordinates in canvas space
   const getPortPosition = (block: BlockInstance, port: Port) => {
-    const width = block.width || 140;
-    const height = block.height || 85;
+    const isSum = block.type === 'sum';
+    const isGain = block.type === 'gain';
+    const width = isSum ? 50 : isGain ? 55 : (block.width || 70);
+    const height = isSum ? 50 : isGain ? 50 : (block.height || 54);
     const isInput = port.type === 'input';
 
     const portsList = isInput ? block.inputs : block.outputs;
@@ -218,7 +211,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     };
   };
 
-  // Keyboard shortcuts (Delete selected block or wire)
+  // Keyboard shortcut: Delete
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -238,39 +231,43 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedBlockId, selectedConnectionId, onDeleteBlock, onDeleteConnection, onSelectBlock]);
 
-  // Center & Reset View
-  const handleResetZoom = () => {
-    setZoom(1.0);
-    setPan({ x: 50, y: 50 });
+  // Construct Orthogonal (Manhattan 90-degree) wire path string
+  const getOrthogonalPath = (start: { x: number; y: number }, end: { x: number; y: number }) => {
+    const dx = end.x - start.x;
+
+    if (dx >= 30) {
+      // Standard forward right-angle routing
+      const midX = start.x + Math.round(dx / 2);
+      return `M ${start.x} ${start.y} L ${midX} ${start.y} L ${midX} ${end.y} L ${end.x} ${end.y}`;
+    } else {
+      // Backward / feedback routing around
+      const offsetRight = start.x + 20;
+      const offsetLeft = end.x - 20;
+      const midY = start.y < end.y ? Math.min(start.y, end.y) - 40 : Math.max(start.y, end.y) + 40;
+      return `M ${start.x} ${start.y} L ${offsetRight} ${start.y} L ${offsetRight} ${midY} L ${offsetLeft} ${midY} L ${offsetLeft} ${end.y} L ${end.x} ${end.y}`;
+    }
   };
 
-  const handleFitToScreen = () => {
-    if (blocks.length === 0) {
-      handleResetZoom();
-      return;
-    }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    blocks.forEach((b) => {
-      minX = Math.min(minX, b.x);
-      minY = Math.min(minY, b.y);
-      maxX = Math.max(maxX, b.x + (b.width || 140));
-      maxY = Math.max(maxY, b.y + (b.height || 85));
+  // Identify junction branching points (where multiple wires leave the same output port)
+  const junctions = React.useMemo(() => {
+    const map = new Map<string, { x: number; y: number; count: number }>();
+    connections.forEach((c) => {
+      const fromBlock = blocks.find((b) => b.id === c.fromBlockId);
+      if (!fromBlock) return;
+      const fromPort = fromBlock.outputs.find((p) => p.id === c.fromPortId);
+      if (!fromPort) return;
+      const key = `${c.fromBlockId}:${c.fromPortId}`;
+      const pos = getPortPosition(fromBlock, fromPort);
+
+      if (!map.has(key)) {
+        map.set(key, { x: pos.x + 15, y: pos.y, count: 1 });
+      } else {
+        const item = map.get(key)!;
+        item.count += 1;
+      }
     });
-
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const padding = 80;
-      const graphWidth = maxX - minX + padding * 2;
-      const graphHeight = maxY - minY + padding * 2;
-      const newZoom = Math.min(rect.width / graphWidth, rect.height / graphHeight, 1.2);
-
-      setZoom(newZoom);
-      setPan({
-        x: (rect.width - (maxX + minX) * newZoom) / 2,
-        y: (rect.height - (maxY + minY) * newZoom) / 2,
-      });
-    }
-  };
+    return Array.from(map.values()).filter((j) => j.count > 1);
+  }, [blocks, connections]);
 
   return (
     <div
@@ -281,46 +278,41 @@ export const Canvas: React.FC<CanvasProps> = ({
       onMouseUp={handleMouseUp}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
-      className="relative flex-1 h-[calc(100vh-3.5rem)] bg-slate-950 overflow-hidden cursor-crosshair select-none"
+      className="relative flex-1 h-[calc(100vh-4.5rem)] bg-white overflow-hidden cursor-crosshair select-none"
       style={{
-        backgroundImage: `radial-gradient(circle, #334155 1px, transparent 1px)`,
+        backgroundImage: `radial-gradient(circle, #cbd5e1 0.75px, transparent 0.75px)`,
         backgroundSize: `${20 * zoom}px ${20 * zoom}px`,
         backgroundPosition: `${pan.x}px ${pan.y}px`,
       }}
     >
-      {/* Zoom / Viewport controls */}
-      <div className="absolute bottom-4 right-4 bg-slate-900/90 border border-slate-800 rounded-lg shadow-xl p-1 flex items-center space-x-1 z-20 backdrop-blur-sm">
+      {/* Floating Zoom Bar */}
+      <div className="absolute bottom-4 right-4 bg-[#f8f9fa] border border-[#d0d0d0] rounded shadow-md p-1 flex items-center space-x-1 z-20">
         <button
           onClick={() => setZoom((z) => Math.min(z * 1.15, 2.2))}
-          className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Acercar (Zoom In)"
+          className="p-1 rounded text-slate-700 hover:bg-slate-200"
+          title="Zoom In"
         >
-          <ZoomIn className="w-4 h-4" />
+          <ZoomIn className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={() => setZoom((z) => Math.max(z * 0.85, 0.35))}
-          className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Alejar (Zoom Out)"
+          onClick={() => setZoom((z) => Math.max(z * 0.85, 0.4))}
+          className="p-1 rounded text-slate-700 hover:bg-slate-200"
+          title="Zoom Out"
         >
-          <ZoomOut className="w-4 h-4" />
+          <ZoomOut className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={handleResetZoom}
-          className="px-2 py-1 rounded text-xs font-mono text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Restablecer zoom al 100%"
+          onClick={() => {
+            setZoom(1.0);
+            setPan({ x: 40, y: 40 });
+          }}
+          className="px-1.5 py-0.5 text-[11px] font-mono text-slate-700 hover:bg-slate-200"
         >
           {Math.round(zoom * 100)}%
         </button>
-        <button
-          onClick={handleFitToScreen}
-          className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-slate-800 transition"
-          title="Centrar diagrama completo"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
       </div>
 
-      {/* SVG Canvas for Wires / Connections */}
+      {/* SVG Canvas for True Orthogonal Simulink Wires */}
       <svg
         className="absolute inset-0 pointer-events-none w-full h-full"
         style={{
@@ -329,31 +321,32 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
       >
         <defs>
+          {/* Classic solid black arrowhead pointing into ports (Screenshot 2) */}
           <marker
-            id="wire-arrow"
+            id="simulink-arrow"
             viewBox="0 0 10 10"
-            refX="6"
+            refX="9"
             refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto"
           >
-            <path d="M 0 1 L 8 5 L 0 9 z" fill="#0284c7" />
+            <polygon points="0,1 10,5 0,9" fill="black" />
           </marker>
           <marker
-            id="wire-arrow-active"
+            id="simulink-arrow-selected"
             viewBox="0 0 10 10"
-            refX="6"
+            refX="9"
             refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto"
           >
-            <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8" />
+            <polygon points="0,1 10,5 0,9" fill="#0284c7" />
           </marker>
         </defs>
 
-        {/* Existing Connections */}
+        {/* Existing Orthogonal Connections */}
         {connections.map((conn) => {
           const fromBlock = blocks.find((b) => b.id === conn.fromBlockId);
           const toBlock = blocks.find((b) => b.id === conn.toBlockId);
@@ -367,12 +360,11 @@ export const Canvas: React.FC<CanvasProps> = ({
           const end = getPortPosition(toBlock, toPort);
 
           const isSelected = selectedConnectionId === conn.id;
-          const dx = Math.max(Math.abs(end.x - start.x) * 0.5, 40);
-          const pathD = `M ${start.x} ${start.y} C ${start.x + dx} ${start.y}, ${end.x - dx} ${end.y}, ${end.x} ${end.y}`;
+          const pathD = getOrthogonalPath(start, end);
 
           return (
             <g key={conn.id} className="pointer-events-auto cursor-pointer">
-              {/* Invisible thicker hit-box path for easy clicking */}
+              {/* Invisible wide path for easy clicking */}
               <path
                 d={pathD}
                 fill="none"
@@ -384,39 +376,54 @@ export const Canvas: React.FC<CanvasProps> = ({
                   onSelectBlock(null);
                 }}
               />
-              {/* Visible connection wire */}
+              {/* Classic Simulink Solid Black Wire */}
               <path
                 d={pathD}
                 fill="none"
-                stroke={isSelected ? '#38bdf8' : '#0284c7'}
-                strokeWidth={isSelected ? 3 : 2}
-                strokeDasharray={isSelected ? '4,4' : undefined}
-                markerEnd={isSelected ? 'url(#wire-arrow-active)' : 'url(#wire-arrow)'}
-                className="transition-colors hover:stroke-sky-300"
+                stroke={isSelected ? '#0284c7' : '#000000'}
+                strokeWidth={isSelected ? 2.0 : 1.3}
+                markerEnd={isSelected ? 'url(#simulink-arrow-selected)' : 'url(#simulink-arrow)'}
+                className="transition-colors"
               />
-              {/* Port connection dots */}
-              <circle cx={start.x} cy={start.y} r={3} fill="#0284c7" />
-              <circle cx={end.x} cy={end.y} r={3} fill="#10b981" />
+              {/* Signal wire label if present */}
+              {conn.label && (
+                <text
+                  x={(start.x + end.x) / 2}
+                  y={(start.y + end.y) / 2 - 4}
+                  fill="#000000"
+                  fontSize="10"
+                  fontFamily="sans-serif"
+                  fontWeight="normal"
+                  textAnchor="middle"
+                >
+                  {conn.label}
+                </text>
+              )}
             </g>
           );
         })}
 
-        {/* In-progress Active Wire */}
+        {/* Junction Dots (Screenshot 2: Filled circle where lines branch) */}
+        {junctions.map((j, idx) => (
+          <circle key={idx} cx={j.x} cy={j.y} r={3} fill="black" />
+        ))}
+
+        {/* Live Active Wire when dragging */}
         {activeWire && (
           <path
-            d={`M ${activeWire.startX} ${activeWire.startY} C ${activeWire.startX + 50} ${activeWire.startY}, ${
-              activeWire.currentX - 50
-            } ${activeWire.currentY}, ${activeWire.currentX} ${activeWire.currentY}`}
+            d={getOrthogonalPath(
+              { x: activeWire.startX, y: activeWire.startY },
+              { x: activeWire.currentX, y: activeWire.currentY }
+            )}
             fill="none"
-            stroke="#38bdf8"
-            strokeWidth={2.5}
-            strokeDasharray="5,5"
-            className="animate-pulse"
+            stroke="#0284c7"
+            strokeWidth={1.5}
+            strokeDasharray="4,4"
           />
         )}
       </svg>
 
-      {/* Blocks Layer */}
+      {/* Blocks Layer (Identical to Screenshot 2) */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -425,11 +432,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         }}
       >
         {blocks.map((block) => {
-          const def = BLOCK_DEFINITIONS[block.type];
           const isSelected = selectedBlockId === block.id;
-          const width = block.width || 140;
-          const height = block.height || 85;
-          const isScopeOrSink = ['scope', 'spectrum', 'audio_sink'].includes(block.type);
+          const isSum = block.type === 'sum';
+          const isGain = block.type === 'gain';
+          const width = isSum ? 50 : isGain ? 55 : (block.width || 70);
+          const height = isSum ? 50 : isGain ? 50 : (block.height || 54);
+          const isScope = block.type === 'scope' || block.type === 'spectrum' || block.type === 'audio_sink';
 
           return (
             <div
@@ -444,65 +452,39 @@ export const Canvas: React.FC<CanvasProps> = ({
                 width: `${width}px`,
                 height: `${height}px`,
               }}
-              className={`absolute pointer-events-auto rounded-lg bg-slate-900 border transition-shadow shadow-md select-none group cursor-move ${
+              className={`absolute pointer-events-auto cursor-move select-none group flex flex-col items-center justify-center ${
+                isSum ? 'rounded-full' : 'rounded-[2px]'
+              } bg-white border-[1.5px] ${
                 isSelected
-                  ? 'border-sky-400 ring-2 ring-sky-400/40 shadow-sky-950/80 shadow-lg'
-                  : 'border-slate-700/80 hover:border-slate-500'
+                  ? 'border-[#0284c7] ring-2 ring-sky-300 shadow-md'
+                  : 'border-black shadow-[2px_2px_0px_rgba(0,0,0,0.18)]'
               }`}
             >
-              {/* Block Header */}
-              <div
-                className="h-6 px-2 rounded-t-lg flex items-center justify-between text-[11px] font-semibold text-white truncate"
-                style={{ backgroundColor: def?.color || '#0284c7' }}
-              >
-                <span className="truncate">{block.title || def?.name}</span>
-                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenBlockModal(block);
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 text-white/90"
-                    title="Parámetros del bloque"
-                  >
-                    <Settings2 className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteBlock(block.id);
-                    }}
-                    className="p-0.5 rounded hover:bg-black/20 text-white/90"
-                    title="Eliminar bloque"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </div>
+              {/* Internal Math Symbol / Simulink Glyph */}
+              <div className="w-full h-full flex flex-col items-center justify-center p-1 pointer-events-none">
+                {renderSimulinkGlyph(block.type)}
               </div>
 
-              {/* Block Body / Math representation */}
-              <div className="flex-1 h-[calc(100%-1.5rem)] flex flex-col items-center justify-center p-1 text-center relative">
-                {/* Symbolic visual badge */}
-                <span className="font-mono text-sm font-bold text-slate-200 tracking-wider">
-                  {getBlockFormulaPreview(block)}
-                </span>
-                <span className="text-[9px] text-slate-400 truncate max-w-[120px] mt-0.5">
-                  {getBlockParamSummary(block)}
-                </span>
+              {/* Scope Quick Open button on hover */}
+              {isScope && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenScopeModal(block);
+                  }}
+                  className="absolute -top-3 right-0 opacity-0 group-hover:opacity-100 bg-[#0284c7] hover:bg-sky-600 text-white rounded px-1.5 py-0.5 text-[9px] font-bold flex items-center space-x-1 shadow transition"
+                  title="Abrir Pantalla"
+                >
+                  <ExternalLink className="w-2.5 h-2.5" />
+                  <span>Ver</span>
+                </button>
+              )}
 
-                {/* Sinks "Open View" quick button */}
-                {isScopeOrSink && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenScopeModal(block);
-                    }}
-                    className="mt-1 flex items-center space-x-1 px-1.5 py-0.5 rounded bg-sky-950 hover:bg-sky-900 text-sky-400 border border-sky-800/80 text-[10px] font-medium transition"
-                  >
-                    <ExternalLink className="w-2.5 h-2.5" />
-                    <span>Ver Gráfico</span>
-                  </button>
-                )}
+              {/* Block Title Placed BELOW Block (Screenshot 2: e.g. "Set Point", "Heater Blower") */}
+              <div
+                className="absolute top-full mt-1 w-32 -left-8 text-center text-[11px] font-sans text-black leading-tight pointer-events-none break-words"
+              >
+                {block.title || block.type}
               </div>
 
               {/* Input Ports (Left) */}
@@ -517,11 +499,11 @@ export const Canvas: React.FC<CanvasProps> = ({
                     onMouseDown={(e) => handlePortMouseDown(e, block, port)}
                     onMouseUp={(e) => handlePortMouseUp(e, block, port)}
                     style={{
-                      top: `${portPos.y - block.y - 6}px`,
-                      left: '-6px',
+                      top: `${portPos.y - block.y - 4}px`,
+                      left: '-5px',
                     }}
-                    className={`absolute w-3 h-3 rounded-full border-2 border-slate-950 bg-emerald-500 hover:scale-125 transition-transform cursor-pointer z-10 ${
-                      isHovered ? 'ring-2 ring-emerald-400 animate-ping' : ''
+                    className={`absolute w-2.5 h-2.5 bg-black rounded-[1px] hover:scale-150 transition-transform cursor-pointer z-10 ${
+                      isHovered ? 'ring-2 ring-sky-500 scale-125' : ''
                     }`}
                     title={`Entrada: ${port.name}`}
                   />
@@ -538,10 +520,10 @@ export const Canvas: React.FC<CanvasProps> = ({
                     onMouseDown={(e) => handlePortMouseDown(e, block, port)}
                     onMouseUp={(e) => handlePortMouseUp(e, block, port)}
                     style={{
-                      top: `${portPos.y - block.y - 6}px`,
-                      right: '-6px',
+                      top: `${portPos.y - block.y - 4}px`,
+                      right: '-5px',
                     }}
-                    className="absolute w-3 h-3 rounded-full border-2 border-slate-950 bg-sky-500 hover:scale-125 transition-transform cursor-pointer z-10 hover:bg-sky-400"
+                    className="absolute w-2.5 h-2.5 bg-black rounded-[1px] hover:scale-150 transition-transform cursor-pointer z-10 hover:bg-sky-600"
                     title={`Salida: ${port.name}`}
                   />
                 );
@@ -553,84 +535,3 @@ export const Canvas: React.FC<CanvasProps> = ({
     </div>
   );
 };
-
-/**
- * Returns a brief mathematical formula preview string for block center.
- */
-function getBlockFormulaPreview(block: BlockInstance): string {
-  const p = block.params;
-  switch (block.type) {
-    case 'sine_source':
-      return `~ sin(${p.frequency ?? 50}Hz)`;
-    case 'square_source':
-      return `⎍ ${p.frequency ?? 20}Hz`;
-    case 'triangle_source':
-      return `▲ ${p.frequency ?? 20}Hz`;
-    case 'noise_source':
-      return `〰 Ruido`;
-    case 'step_source':
-      return `⌐ u(t-${p.stepTime ?? 0.1})`;
-    case 'impulse_source':
-      return `↑ δ(t)`;
-    case 'constant_source':
-      return `K = ${p.value ?? 1}`;
-    case 'wav_source':
-      return `♫ .WAV`;
-    case 'gain':
-      return `▷ K = ${p.gain ?? 1}`;
-    case 'sum':
-      return `Σ (${p.signs || '++'})`;
-    case 'product':
-      return `✕ Product`;
-    case 'math_func':
-      return `${p.func || 'abs'}(u)`;
-    case 'derivative':
-      return `d/dt`;
-    case 'integrator':
-      return `1/s ∫`;
-    case 'fir_filter':
-      return p.designMode === 'designer' ? `FIR (${p.cutoffFreq ?? 200}Hz)` : `FIR [b]`;
-    case 'iir_filter':
-      return p.designMode === 'designer' ? `IIR (${p.cutoffFreq ?? 250}Hz)` : `IIR [b,a]`;
-    case 'continuous_tf':
-      return `H(s)`;
-    case 'discrete_tf':
-      return `H(z)`;
-    case 'unit_delay':
-      return p.samples > 1 ? `z⁻${p.samples}` : `z⁻¹`;
-    case 'moving_average':
-      return `MA(${p.windowSize ?? 5})`;
-    case 'zoh':
-      return `ZOH (${p.holdFrequency ?? 200}Hz)`;
-    case 'adc':
-      return `ADC (${p.bits ?? 4}-bit)`;
-    case 'dac':
-      return `DAC`;
-    case 'scope':
-      return `📊 Scope`;
-    case 'spectrum':
-      return `📈 FFT`;
-    case 'audio_sink':
-      return `🔊 Parlantes`;
-    default:
-      return block.type;
-  }
-}
-
-function getBlockParamSummary(block: BlockInstance): string {
-  const p = block.params;
-  switch (block.type) {
-    case 'sine_source':
-      return `A = ${p.amplitude ?? 1.0}V`;
-    case 'adc':
-      return `±${p.vRef ?? 1.0}V, ${p.mode || 'mid-tread'}`;
-    case 'fir_filter':
-      return p.designMode === 'designer' ? `${p.filterType}, N=${p.order ?? 32}` : `${(p.coefficients || []).length} taps`;
-    case 'continuous_tf':
-      return `num=[${p.numStr}], den=[${p.denStr}]`;
-    case 'discrete_tf':
-      return `num=[${p.numStr}], den=[${p.denStr}]`;
-    default:
-      return '';
-  }
-}
