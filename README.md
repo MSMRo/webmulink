@@ -3,6 +3,8 @@
 
 **Webmulink** es una plataforma web interactiva inspirada fielmente en la interfaz clásica de **MATLAB Simulink**. Se ejecuta tanto de forma estática en **GitHub Pages** como localmente con el gestor de paquetes ultrarrápido **`uv` de Python**.
 
+![](./imgs/Screenshot%202026-10-19%20222753.png)
+
 ---
 
 ## 📸 Interfaz Fiel a MATLAB Simulink
